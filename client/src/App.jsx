@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Users, FileText, Settings, Bell, Search, Plus, Trash2, Calendar, Download } from 'lucide-react';
 import CurrencyInput from './components/CurrencyInput';
 import TimeCard from './components/TimeCard';
-import DashboardChart from './components/DashboardChart';
+import CalendarWidget from './components/CalendarWidget';
 import { calculateDailyPay, formatCurrency } from './utils/calculations';
+import logo from './assets/logo.png';
 
 const App = () => {
   const [baseSalary, setBaseSalary] = useState(30000);
@@ -11,6 +12,7 @@ const App = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showEntryForm, setShowEntryForm] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
 
   const API_URL = 'http://localhost:5000/api';
 
@@ -67,8 +69,11 @@ const App = () => {
 
   const handleAddEntry = async (entry) => {
     try {
-      const res = await fetch(`${API_URL}/entries`, {
-        method: 'POST',
+      const method = entry._id ? 'PUT' : 'POST';
+      const url = entry._id ? `${API_URL}/entries/${entry._id}` : `${API_URL}/entries`;
+
+      const res = await fetch(url, {
+        method: method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(entry)
       });
@@ -77,9 +82,48 @@ const App = () => {
         setShowEntryForm(false);
         // Calculate estimated pay for feedback
         const calc = calculateDailyPay(entry, baseSalary);
-        showNotification(`Entry Added! Earned: ${formatCurrency(calc.otPay)} OT`);
+        showNotification(entry._id ? `Entry Updated!` : `Entry Added! Earned: ${formatCurrency(calc.otPay)} OT`);
       }
     } catch (err) { console.error(err); }
+  };
+
+  const [selectedIds, setSelectedIds] = useState([]);
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === processedEntries.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(processedEntries.map(e => e._id));
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (window.confirm("Are you sure you want to delete this entry?")) {
+      try {
+        await fetch(`${API_URL}/entries/${id}`, { method: 'DELETE' });
+        fetchData();
+        showNotification("Entry deleted successfully");
+        if (selectedIds.includes(id)) {
+          setSelectedIds(prev => prev.filter(i => i !== id));
+        }
+      } catch (err) { console.error(err); }
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (window.confirm(`Are you sure you want to delete ${selectedIds.length} entries?`)) {
+      try {
+        // Delete efficiently - parallel requests since we don't have a bulk delete endpoint
+        await Promise.all(selectedIds.map(id => fetch(`${API_URL}/entries/${id}`, { method: 'DELETE' })));
+        fetchData();
+        setSelectedIds([]);
+        showNotification(`${selectedIds.length} entries deleted successfully`);
+      } catch (err) { console.error(err); }
+    }
   };
 
   if (loading) return (
@@ -91,13 +135,13 @@ const App = () => {
   return (
     <div className="min-h-screen bg-[#F8F9FA] font-sans text-slate-800 flex flex-col md:flex-row">
 
+
+
       {/* STELLA SIDEBAR */}
       <aside className="bg-white lg:w-64 w-20 flex-shrink-0 border-r border-slate-100 flex flex-col fixed h-full z-50">
         <div className="p-6 flex items-center gap-3">
-          <div className="bg-blue-600 text-white p-2 rounded-xl">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>
-          </div>
-          <span className="font-extrabold text-xl tracking-tight hidden lg:block text-slate-900">Stella</span>
+          <img src={logo} alt="TNL Garments" className="w-10 h-10 object-contain" />
+          <span className="font-extrabold text-lg tracking-tight hidden lg:block text-slate-900 leading-tight">TNL Garments</span>
         </div>
 
         <nav className="flex-1 px-4 py-6 space-y-2">
@@ -155,30 +199,37 @@ const App = () => {
         <div className="p-8 space-y-8 max-w-[1600px] mx-auto">
 
           {/* ACTION BAR */}
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <button onClick={() => setShowEntryForm(!showEntryForm)} className="bg-white border border-slate-200 text-slate-600 px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm hover:bg-slate-50 flex items-center gap-2">
-              <Settings size={16} />
-              {showEntryForm ? 'Hide Form' : 'Payroll Settings'}
-            </button>
 
-            <div className="flex gap-3">
-              <div className="bg-white border border-slate-200 px-4 py-2.5 rounded-xl text-sm font-bold text-slate-600 flex items-center gap-2 shadow-sm">
-                <Calendar size={16} />
-                <span>{new Date().toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</span>
+
+
+          {/* CALENDAR & ENTRY ROW */}
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            {/* Calendar Section */}
+            <div className="xl:col-span-1">
+              <CalendarWidget
+                entries={entries}
+                selectedDate={selectedDate}
+                onDateSelect={(date) => {
+                  // Adjust for timezone offset for display
+                  const offset = date.getTimezoneOffset();
+                  const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+                  setSelectedDate(localDate);
+                  setShowEntryForm(true);
+                }}
+              />
+            </div>
+
+            {/* Time Entry Form */}
+            <div className="xl:col-span-2">
+              <div className="animate-fade-in h-full">
+                <TimeCard
+                  onSave={handleAddEntry}
+                  initialDate={selectedDate.toISOString().split('T')[0]}
+                  existingEntry={entries.find(e => new Date(e.date).toDateString() === selectedDate.toDateString())}
+                />
               </div>
-              <button className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg shadow-blue-200">
-                <Download size={16} />
-                Export CSV
-              </button>
             </div>
           </div>
-
-          {/* ENTRY FORM (TOGGLEABLE) */}
-          {showEntryForm && (
-            <div className="animate-fade-in mb-8">
-              <TimeCard onSave={handleAddEntry} />
-            </div>
-          )}
 
           {/* METRICS ROW */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -203,34 +254,22 @@ const App = () => {
             </div>
           </div>
 
-          {/* CHART & PROMO ROW */}
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-            <div className="xl:col-span-2 h-[400px]">
-              <DashboardChart data={processedEntries} />
-            </div>
-            <div className="xl:col-span-1">
-              <div className="bg-gradient-to-br from-blue-500 to-indigo-600 rounded-3xl p-8 text-white h-full relative overflow-hidden flex flex-col justify-center items-center text-center">
-                <div className="absolute top-0 left-0 w-full h-full bg-white opacity-10" style={{ backgroundImage: 'radial-gradient(circle, #fff 10%, transparent 10%)', backgroundSize: '20px 20px' }}></div>
-                <div className="bg-white/20 p-4 rounded-2xl mb-6 backdrop-blur-sm relative z-10">
-                  <Plus size={32} />
-                </div>
-                <h3 className="text-2xl font-bold mb-2 relative z-10">Quick Entry</h3>
-                <p className="text-blue-100 mb-6 relative z-10">Log today's work hours instantly with a single click.</p>
-                <button
-                  onClick={() => setShowEntryForm(true)}
-                  className="bg-white text-blue-600 px-8 py-3 rounded-xl font-bold hover:shadow-lg transition-all active:scale-95 relative z-10"
-                >
-                  Add New Entry
-                </button>
-              </div>
-            </div>
-          </div>
+
 
           {/* DATA TABLE */}
           <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
             <div className="p-6 border-b border-slate-50 flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <h3 className="text-lg font-bold text-slate-800">Payroll Entries</h3>
+                {selectedIds.length > 0 && (
+                  <button
+                    onClick={handleBulkDelete}
+                    className="flex items-center gap-2 bg-rose-50 text-rose-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-rose-100 transition-colors animate-fade-in"
+                  >
+                    <Trash2 size={14} />
+                    <span>Delete {selectedIds.length} Selected</span>
+                  </button>
+                )}
               </div>
               <div className="flex gap-2">
                 <button className="px-3 py-1.5 text-xs font-bold border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">Filter</button>
@@ -245,7 +284,14 @@ const App = () => {
               <table className="w-full text-sm text-left">
                 <thead className="bg-[#F9FAFB] text-slate-500 font-semibold border-b border-slate-100">
                   <tr>
-                    <th className="px-6 py-4 rounded-tl-xl"><div className="w-4 h-4 border-2 border-slate-300 rounded mx-auto"></div></th>
+                    <th className="px-6 py-4 rounded-tl-xl text-center">
+                      <input
+                        type="checkbox"
+                        checked={processedEntries.length > 0 && selectedIds.length === processedEntries.length}
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                      />
+                    </th>
                     <th className="px-6 py-4">Date</th>
                     <th className="px-6 py-4">Total Pay</th>
                     <th className="px-6 py-4">Hours</th>
@@ -256,9 +302,14 @@ const App = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-50">
                   {processedEntries.map((entry) => (
-                    <tr key={entry._id} className="hover:bg-slate-50/50 transition-colors group">
+                    <tr key={entry._id} className={`hover:bg-slate-50/50 transition-colors group ${selectedIds.includes(entry._id) ? 'bg-blue-50/30' : ''}`}>
                       <td className="px-6 py-4 text-center">
-                        <div className="w-4 h-4 border-2 border-slate-300 rounded mx-auto group-hover:border-blue-400 cursor-pointer"></div>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(entry._id)}
+                          onChange={() => toggleSelect(entry._id)}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        />
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">

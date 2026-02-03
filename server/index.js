@@ -51,6 +51,16 @@ app.delete('/api/entries/:id', async (req, res) => {
     }
 });
 
+// Update entry
+app.put('/api/entries/:id', async (req, res) => {
+    try {
+        const updatedEntry = await TimeEntry.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        res.json(updatedEntry);
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    }
+});
+
 // Get Settings
 app.get('/api/settings', async (req, res) => {
     try {

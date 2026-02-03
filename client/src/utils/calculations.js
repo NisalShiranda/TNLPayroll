@@ -63,13 +63,9 @@ export const calculateDailyPay = (entry, baseSalary) => {
 
     return {
         date: entry.date,
-        hours: actualWorkHours,
-        otHours,
+        hours: Number(actualWorkHours.toFixed(2)),
+        otHours: Number(otHours.toFixed(2)),
         otPay,
-        totalPay: otPay // Assuming only OT is variable pay, base salary is fixed?
-        // If we need to show "Day Value" including base:
-        // For Mon-Fri/Sat, the 'base' part is covered by salary. 
-        // Only Special Days seem to be "All calculated as OT".
-        // I will return structure so UI can decide.
+        totalPay: otPay
     };
 };

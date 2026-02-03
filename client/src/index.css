@@ -1,9 +1,159 @@
 @import "tailwindcss";
 
-@layer base {
-  body {
-    @apply bg-slate-50 text-slate-900 font-sans antialiased;
-    background-image: linear-gradient(to bottom right, #f8fafc, #edf2f7);
-    min-height: 100vh;
-  }
+body {
+  background-color: #f8fafc;
+  min-height: 100vh;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  background: linear-gradient(135deg, #f8f9fa 0%, #eef2f6 100%);
+}
+
+/* Calendar Container */
+.react-calendar {
+  width: 100% !important;
+  border: none !important;
+  background: transparent !important;
+  font-family: 'Inter', sans-serif !important;
+}
+
+/* Navigation (Month/Year & Arrows) */
+.react-calendar__navigation {
+  display: flex;
+  margin-bottom: 24px;
+  /* More space below header */
+  align-items: center;
+}
+
+.react-calendar__navigation button {
+  min-width: 44px;
+  height: 44px;
+  /* Larger buttons */
+  background: none;
+  font-size: 18px;
+  /* Larger Text */
+  font-weight: 800;
+  color: #0f172a;
+  /* Slate 900 */
+  border-radius: 14px;
+}
+
+.react-calendar__navigation button:enabled:hover,
+.react-calendar__navigation button:enabled:focus {
+  background-color: #f1f5f9;
+}
+
+.react-calendar__navigation__label {
+  flex-grow: 1;
+  font-size: 20px !important;
+  /* Larger Month Title */
+}
+
+/* Weekdays (Mon, Tue...) */
+.react-calendar__month-view__weekdays {
+  text-align: center;
+  text-transform: uppercase;
+  font-weight: 800;
+  font-size: 0.75rem;
+  color: #64748b;
+  /* Slate 500 */
+  margin-bottom: 16px;
+  letter-spacing: 0.1em;
+  border-bottom: 1px solid #f1f5f9;
+  /* Subtle divider */
+  padding-bottom: 12px;
+}
+
+.react-calendar__month-view__weekdays__weekday {
+  padding: 0;
+  text-decoration: none !important;
+}
+
+.react-calendar__month-view__weekdays__weekday abbr {
+  text-decoration: none !important;
+  cursor: default;
+}
+
+/* Day Tiles */
+.react-calendar__tile {
+  padding: 16px 0 !important;
+  /* Taller tiles */
+  background: none;
+  text-align: center;
+  font-weight: 600;
+  font-size: 15px;
+  color: #334155;
+  border-radius: 16px;
+  /* 100% rounded for circles or large rounded rects */
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  margin-top: 4px;
+  /* Space between rows */
+  border: 2px solid transparent !important;
+  position: relative;
+}
+
+/* Hover State */
+.react-calendar__tile:enabled:hover,
+.react-calendar__tile:enabled:focus {
+  background-color: #f8fafc;
+  color: #2563eb;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  z-index: 10;
+}
+
+/* Today */
+.react-calendar__tile--now {
+  background: white !important;
+  color: #2563eb !important;
+  font-weight: 800 !important;
+  border: 2px solid #bfdbfe !important;
+  /* Ring for today */
+}
+
+/* Selected Date */
+.react-calendar__tile--active,
+.react-calendar__tile--active:enabled:hover,
+.react-calendar__tile--active:enabled:focus {
+  background: #2563eb !important;
+  color: white !important;
+  box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.4);
+  transform: scale(1.1);
+  z-index: 20;
+}
+
+/* HAS ENTRY (User requirement: Change color for dates with data) */
+/* Solid Emerald Background for clear visibility */
+.has-entry {
+  background-color: #10b981 !important;
+  /* Emerald 500 */
+  color: white !important;
+  font-weight: 700;
+  box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.3);
+}
+
+.react-calendar__tile--active.has-entry {
+  background: #059669 !important;
+  /* Darker Emerald */
+  color: white !important;
+  border: 2px solid white !important;
+  /* Ring to show selection on top of entry */
+}
+
+/* Time Picker Styling */
+input[type="time"]::-webkit-calendar-picker-indicator {
+  background: transparent;
+  bottom: 0;
+  color: transparent;
+  cursor: pointer;
+  height: auto;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: auto;
+  opacity: 0;
+  z-index: 10;
+}
+
+input[type="time"] {
+  position: relative;
 }
