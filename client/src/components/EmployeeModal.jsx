@@ -1,9 +1,22 @@
 import React, { useState } from 'react';
 
-const EmployeeModal = ({ isOpen, onClose, onSave }) => {
+const EmployeeModal = ({ isOpen, onClose, onSave, initialData }) => {
     const [name, setName] = useState('');
     const [baseSalary, setBaseSalary] = useState(30000);
     const [loading, setLoading] = useState(false);
+
+    // Reset or Populate form on open
+    React.useEffect(() => {
+        if (isOpen) {
+            if (initialData) {
+                setName(initialData.name);
+                setBaseSalary(initialData.baseSalary);
+            } else {
+                setName('');
+                setBaseSalary(30000);
+            }
+        }
+    }, [isOpen, initialData]);
 
     if (!isOpen) return null;
 
@@ -12,17 +25,25 @@ const EmployeeModal = ({ isOpen, onClose, onSave }) => {
         if (!name.trim()) return;
 
         setLoading(true);
-        await onSave({ name, baseSalary: Number(baseSalary) });
+        // Pass back data (include ID if editing)
+        const payload = {
+            name,
+            baseSalary: Number(baseSalary)
+        };
+
+        if (initialData && initialData._id) {
+            payload._id = initialData._id;
+        }
+
+        await onSave(payload);
         setLoading(false);
-        setName('');
-        setBaseSalary(30000);
         onClose();
     };
 
     return (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-fade-in">
             <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6">
-                <h2 className="text-xl font-bold text-slate-800 mb-6">Add New Employee</h2>
+                <h2 className="text-xl font-bold text-slate-800 mb-6">{initialData ? 'Edit Employee' : 'Add New Employee'}</h2>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
@@ -60,7 +81,7 @@ const EmployeeModal = ({ isOpen, onClose, onSave }) => {
                             disabled={loading}
                             className="flex-1 py-3 px-6 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all disabled:opacity-50"
                         >
-                            {loading ? 'Saving...' : 'Create Employee'}
+                            {loading ? 'Saving...' : (initialData ? 'Update Employee' : 'Create Employee')}
                         </button>
                     </div>
                 </form>

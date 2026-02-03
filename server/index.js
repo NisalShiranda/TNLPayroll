@@ -113,6 +113,22 @@ app.put('/api/employees/:id', async (req, res) => {
     }
 });
 
+
+// Delete Employee
+app.delete('/api/employees/:id', async (req, res) => {
+    try {
+        const empId = req.params.id;
+        // Delete the employee
+        await Employee.findByIdAndDelete(empId);
+        // Delete associated entries
+        await TimeEntry.deleteMany({ employeeId: empId });
+
+        res.json({ message: 'Employee and associated entries deleted' });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
 // Get Settings
 app.get('/api/settings', async (req, res) => {
     try {
