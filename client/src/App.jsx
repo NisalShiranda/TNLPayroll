@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Users, FileText, Settings, Bell, Search, Plus, Trash2, Calendar, Download, Edit2 } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Bell, Calendar, Clock, DollarSign, Download, Filter, Menu, Plus, RefreshCw, Search, Settings, Trash2, X, ChevronRight, Edit2 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import CurrencyInput from './components/CurrencyInput';
@@ -29,6 +29,8 @@ const App = () => {
   const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'verified', 'regular'
   const [filterStartDate, setFilterStartDate] = useState('');
   const [filterEndDate, setFilterEndDate] = useState('');
+  const [bonus, setBonus] = useState(0);
+  const [advance, setAdvance] = useState(0);
 
   const API_URL = 'http://localhost:5000/api';
 
@@ -219,51 +221,83 @@ const App = () => {
   const handleExportPDF = () => {
     const doc = new jsPDF();
 
-    // Title
-    doc.setFontSize(18);
-    doc.text('TNL Garments - Payroll Report', 14, 20);
+    // -- 1. HEADER --
+    doc.setFontSize(22);
+    doc.text('TNL Garments', 105, 20, { align: 'center' });
+    doc.setFontSize(14);
+    doc.text('Salary Statement', 105, 28, { align: 'center' });
+
+    doc.setLineWidth(0.5);
+    doc.line(14, 32, 196, 32);
+
+    // -- 2. EMPLOYEE & PERIOD INFO --
     doc.setFontSize(10);
-    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 28);
+    doc.text(`Employee Name: ${selectedEmployee?.name || 'N/A'}`, 14, 40);
 
-    // Period Info
-    let periodText = `Billing Period: ${billingStart.toLocaleDateString()} - ${billingEnd.toLocaleDateString()}`;
+    let periodText = `${billingStart.toLocaleDateString()} to ${billingEnd.toLocaleDateString()}`;
     if (filterStartDate && filterEndDate) {
-      periodText = `Custom Period: ${filterStartDate} - ${filterEndDate}`;
+      periodText = `${filterStartDate} to ${filterEndDate}`;
     }
-    doc.text(periodText, 14, 34);
+    doc.text(`Pay Period: ${periodText}`, 14, 46);
+    doc.text(`Generated On: ${new Date().toLocaleDateString()}`, 14, 52);
 
-    // Table
-    const tableColumn = ["Date", "Status", "Hours Worked", "OT Hours", "OT Pay (LKR)"];
-
-    // Use selected rows if any, otherwise all filtered rows
+    // -- 3. CALCULATIONS --
     const dataToExport = selectedIds.length > 0
       ? filteredEntries.filter(e => selectedIds.includes(e._id))
       : filteredEntries;
 
+    const normalOT = dataToExport.filter(e => !e.isSpecialDay).reduce((acc, curr) => acc + curr.otPay, 0);
+    const specialOT = dataToExport.filter(e => e.isSpecialDay).reduce((acc, curr) => acc + curr.otPay, 0);
+    const totalOTSum = normalOT + specialOT;
+
+    const baseSal = Number(selectedEmployee?.baseSalary || 0);
+    const bonusVal = Number(bonus);
+    const advanceVal = Number(advance);
+    const netSalary = baseSal + totalOTSum + bonusVal - advanceVal;
+
+    // -- 4. SALARY SUMMARY TABLE --
+    autoTable(doc, {
+      startY: 60,
+      head: [['Description', 'Amount (LKR)']],
+      body: [
+        ['Base Salary', formatCurrency(baseSal).replace('LKR', '').trim()],
+        ['OT (Normal Days)', formatCurrency(normalOT).replace('LKR', '').trim()],
+        ['OT (Special Days)', formatCurrency(specialOT).replace('LKR', '').trim()],
+        ['Bonus', formatCurrency(bonusVal).replace('LKR', '').trim()],
+        ['Advance (Deduction)', `(${formatCurrency(advanceVal).replace('LKR', '').trim()})`],
+        [{ content: 'NET SALARY', styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } }, { content: formatCurrency(netSalary).replace('LKR', '').trim(), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } }]
+      ],
+      theme: 'grid',
+      headStyles: { fillColor: [41, 128, 185], halign: 'center' },
+      columnStyles: {
+        0: { cellWidth: 100 },
+        1: { halign: 'right' }
+      },
+      styles: { fontSize: 10 }
+    });
+
+    // -- 5. ATTENDANCE DETAILS TABLE --
+    doc.text('Attendance & OT Details', 14, doc.lastAutoTable.finalY + 15);
+
+    const tableColumn = ["Date", "Status", "Hours", "OT Hours", "OT Pay"];
     const exportRows = dataToExport.map(entry => [
       new Date(entry.date).toLocaleDateString(),
-      entry.isSpecialDay ? "Special Day" : "Normal Day",
+      entry.isSpecialDay ? "Special Day" : "Normal",
       entry.hours,
       entry.otHours,
       formatCurrency(entry.otPay).replace('LKR', '').trim()
     ]);
 
     autoTable(doc, {
-      startY: 40,
+      startY: doc.lastAutoTable.finalY + 20,
       head: [tableColumn],
       body: exportRows,
       theme: 'grid',
       styles: { fontSize: 9 },
-      headStyles: { fillColor: [16, 185, 129] } // Emerald Green
+      headStyles: { fillColor: [100, 116, 139] }
     });
 
-    // Summary
-    const finalY = doc.lastAutoTable.finalY + 10;
-    const totalOTSum = dataToExport.reduce((acc, curr) => acc + curr.otPay, 0);
-    doc.setFontSize(12);
-    doc.text(`Total OT Pay: ${formatCurrency(totalOTSum)}`, 14, finalY);
-
-    doc.save('tnl-payroll-report.pdf');
+    doc.save(`Salary_Sheet_${selectedEmployee?.name || 'Employee'}.pdf`);
   };
 
   const toggleSelect = (id) => {
@@ -490,33 +524,35 @@ const App = () => {
 
 
               {/* CALENDAR & ENTRY ROW */}
-              <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-                {/* Calendar Section */}
-                <div className="xl:col-span-1">
-                  <CalendarWidget
-                    entries={entries}
-                    selectedDate={selectedDate}
-                    onDateSelect={(date) => {
-                      // Adjust for timezone offset for display
-                      const offset = date.getTimezoneOffset();
-                      const localDate = new Date(date.getTime() - (offset * 60 * 1000));
-                      setSelectedDate(localDate);
-                      setShowEntryForm(true);
-                    }}
-                  />
-                </div>
-
-                {/* Time Entry Form */}
-                <div className="xl:col-span-2">
-                  <div className="animate-fade-in h-full">
-                    <TimeCard
-                      onSave={handleAddEntry}
-                      initialDate={selectedDate.toISOString().split('T')[0]}
-                      existingEntry={entries.find(e => new Date(e.date).toDateString() === selectedDate.toDateString())}
+              {activeTab === 'dashboard' && (
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                  {/* Calendar Section */}
+                  <div className="xl:col-span-1">
+                    <CalendarWidget
+                      entries={entries}
+                      selectedDate={selectedDate}
+                      onDateSelect={(date) => {
+                        // Adjust for timezone offset for display
+                        const offset = date.getTimezoneOffset();
+                        const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+                        setSelectedDate(localDate);
+                        setShowEntryForm(true);
+                      }}
                     />
                   </div>
+
+                  {/* Time Entry Form */}
+                  <div className="xl:col-span-2">
+                    <div className="animate-fade-in h-full">
+                      <TimeCard
+                        onSave={handleAddEntry}
+                        initialDate={selectedDate.toISOString().split('T')[0]}
+                        existingEntry={entries.find(e => new Date(e.date).toDateString() === selectedDate.toDateString())}
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* METRICS ROW */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -553,144 +589,206 @@ const App = () => {
 
 
 
-              {/* DATA TABLE */}
-              <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-                <div className="p-6 border-b border-slate-50 flex flex-col gap-4">
-                  <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-3">
-                      <h3 className="text-lg font-bold text-slate-800">Payroll Entries</h3>
-                      {selectedIds.length > 0 && (
-                        <button
-                          onClick={handleBulkDelete}
-                          className="flex items-center gap-2 bg-rose-50 text-rose-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-rose-100 transition-colors animate-fade-in"
-                        >
-                          <Trash2 size={14} />
-                          <span>Delete {selectedIds.length} Selected</span>
-                        </button>
-                      )}
+
+              {/* ADVANCED SALARY CALCULATOR */}
+              {activeTab === 'history' && (
+                <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm mb-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                      <div className="bg-emerald-50 text-emerald-600 p-2 rounded-lg">
+                        <DollarSign size={20} />
+                      </div>
+                      Full Salary Calculation
+                    </h3>
+                    <button
+                      onClick={handleExportPDF}
+                      className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-bold hover:bg-slate-700 transition-colors shadow-lg shadow-slate-200"
+                    >
+                      <Download size={16} />
+                      Export Salary Sheet
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {/* 1. Base Salary */}
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                      <p className="text-xs font-bold text-slate-400 uppercase mb-1">Base Salary</p>
+                      <p className="text-xl font-bold text-slate-700">{formatCurrency(selectedEmployee?.baseSalary || 0)}</p>
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleExportPDF}
-                        className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors shadow-sm"
-                      >
-                        <Download size={14} />
-                        Export PDF
-                      </button>
-                      <button
-                        onClick={() => setShowFilters(!showFilters)}
-                        className={`px-3 py-1.5 text-xs font-bold border rounded-lg hover:bg-slate-50 transition-colors ${showFilters ? 'bg-blue-50 border-blue-200 text-blue-600' : 'border-slate-200 text-slate-600'}`}
-                      >
-                        Filter
-                      </button>
+
+                    {/* 2. Total OT */}
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                      <p className="text-xs font-bold text-slate-400 uppercase mb-1">Total OT ({filteredEntries.length} Days)</p>
+                      <p className="text-xl font-bold text-blue-600">{formatCurrency(totalOT)}</p>
+                    </div>
+
+                    {/* 3. Bonus & Advance Inputs */}
+                    <div className="space-y-3">
+                      <CurrencyInput
+                        value={bonus}
+                        onChange={setBonus}
+                        label="Bonus (+)"
+                      />
+                      <CurrencyInput
+                        value={advance}
+                        onChange={setAdvance}
+                        label="Advance (-)"
+                      />
+                    </div>
+
+                    {/* 4. Final Net Salary */}
+                    <div className="bg-slate-800 p-4 rounded-2xl text-white shadow-lg shadow-slate-200">
+                      <p className="text-xs font-bold text-slate-400 uppercase mb-1">Net Salary</p>
+                      <p className="text-2xl font-bold">
+                        {formatCurrency(Number(selectedEmployee?.baseSalary || 0) + totalOT + Number(bonus) - Number(advance))}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-2 font-medium">
+                        (Base + OT + Bonus) - Advance
+                      </p>
                     </div>
                   </div>
+                </div>
+              )}
 
-                  {/* Filter Bar */}
-                  {showFilters && (
-                    <div className="animate-fade-in flex flex-wrap items-center gap-4 p-4 bg-slate-50/50 rounded-xl border border-slate-100">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Status</span>
-                        <div className="flex bg-white rounded-lg p-1 border border-slate-200 shadow-sm">
-                          <button onClick={() => setFilterStatus('all')} className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${filterStatus === 'all' ? 'bg-slate-800 text-white shadow' : 'text-slate-500 hover:bg-slate-50'}`}>All</button>
-                          <button onClick={() => setFilterStatus('verified')} className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${filterStatus === 'verified' ? 'bg-emerald-500 text-white shadow' : 'text-slate-500 hover:bg-slate-50'}`}>Verified</button>
-                          <button onClick={() => setFilterStatus('regular')} className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${filterStatus === 'regular' ? 'bg-slate-500 text-white shadow' : 'text-slate-500 hover:bg-slate-50'}`}>Regular</button>
-                        </div>
+              {/* DATA TABLE */}
+              {activeTab === 'dashboard' && (
+                <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                  <div className="p-6 border-b border-slate-50 flex flex-col gap-4">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-3">
+                        <h3 className="text-lg font-bold text-slate-800">Payroll Entries</h3>
+                        {selectedIds.length > 0 && (
+                          <button
+                            onClick={handleBulkDelete}
+                            className="flex items-center gap-2 bg-rose-50 text-rose-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-rose-100 transition-colors animate-fade-in"
+                          >
+                            <Trash2 size={14} />
+                            <span>Delete {selectedIds.length} Selected</span>
+                          </button>
+                        )}
                       </div>
-
-                      <div className="w-px h-8 bg-slate-200 hidden md:block"></div>
-
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Date Range</span>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="date"
-                            value={filterStartDate}
-                            onChange={(e) => setFilterStartDate(e.target.value)}
-                            className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-600 outline-none focus:ring-2 focus:ring-blue-100 shadow-sm"
-                          />
-                          <span className="text-slate-300 font-bold">-</span>
-                          <input
-                            type="date"
-                            value={filterEndDate}
-                            onChange={(e) => setFilterEndDate(e.target.value)}
-                            className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-600 outline-none focus:ring-2 focus:ring-blue-100 shadow-sm"
-                          />
-                          {(filterStartDate || filterEndDate) && (
-                            <button
-                              onClick={() => { setFilterStartDate(''); setFilterEndDate(''); }}
-                              className="text-[10px] items-center text-rose-500 font-bold hover:underline flex gap-1"
-                            >
-                              <Trash2 size={10} /> Clear
-                            </button>
-                          )}
-                        </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleExportPDF}
+                          className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors shadow-sm"
+                        >
+                          <Download size={14} />
+                          Export PDF
+                        </button>
+                        <button
+                          onClick={() => setShowFilters(!showFilters)}
+                          className={`px-3 py-1.5 text-xs font-bold border rounded-lg hover:bg-slate-50 transition-colors ${showFilters ? 'bg-blue-50 border-blue-200 text-blue-600' : 'border-slate-200 text-slate-600'}`}
+                        >
+                          Filter
+                        </button>
                       </div>
                     </div>
-                  )}
-                </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm text-left">
-                    <thead className="bg-[#F9FAFB] text-slate-500 font-semibold border-b border-slate-100">
-                      <tr>
-                        <th className="px-6 py-4 rounded-tl-xl text-center">
-                          <input
-                            type="checkbox"
-                            checked={processedEntries.length > 0 && selectedIds.length === processedEntries.length}
-                            onChange={toggleSelectAll}
-                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                          />
-                        </th>
-                        <th className="px-6 py-4">Date</th>
-                        <th className="px-6 py-4">Total Pay</th>
-                        <th className="px-6 py-4">Hours</th>
-                        <th className="px-6 py-4">OT</th>
-                        <th className="px-6 py-4">Status</th>
-                        <th className="px-6 py-4 text-right">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-50">
-                      {filteredEntries.map((entry) => (
-                        <tr key={entry._id} className={`hover:bg-slate-50/50 transition-colors group ${selectedIds.includes(entry._id) ? 'bg-blue-50/30' : ''}`}>
-                          <td className="px-6 py-4 text-center">
+                    {/* Filter Bar */}
+                    {showFilters && (
+                      <div className="animate-fade-in flex flex-wrap items-center gap-4 p-4 bg-slate-50/50 rounded-xl border border-slate-100">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Status</span>
+                          <div className="flex bg-white rounded-lg p-1 border border-slate-200 shadow-sm">
+                            <button onClick={() => setFilterStatus('all')} className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${filterStatus === 'all' ? 'bg-slate-800 text-white shadow' : 'text-slate-500 hover:bg-slate-50'}`}>All</button>
+                            <button onClick={() => setFilterStatus('verified')} className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${filterStatus === 'verified' ? 'bg-emerald-500 text-white shadow' : 'text-slate-500 hover:bg-slate-50'}`}>Verified</button>
+                            <button onClick={() => setFilterStatus('regular')} className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${filterStatus === 'regular' ? 'bg-slate-500 text-white shadow' : 'text-slate-500 hover:bg-slate-50'}`}>Regular</button>
+                          </div>
+                        </div>
+
+                        <div className="w-px h-8 bg-slate-200 hidden md:block"></div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Date Range</span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="date"
+                              value={filterStartDate}
+                              onChange={(e) => setFilterStartDate(e.target.value)}
+                              className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-600 outline-none focus:ring-2 focus:ring-blue-100 shadow-sm"
+                            />
+                            <span className="text-slate-300 font-bold">-</span>
+                            <input
+                              type="date"
+                              value={filterEndDate}
+                              onChange={(e) => setFilterEndDate(e.target.value)}
+                              className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-600 outline-none focus:ring-2 focus:ring-blue-100 shadow-sm"
+                            />
+                            {(filterStartDate || filterEndDate) && (
+                              <button
+                                onClick={() => { setFilterStartDate(''); setFilterEndDate(''); }}
+                                className="text-[10px] items-center text-rose-500 font-bold hover:underline flex gap-1"
+                              >
+                                <Trash2 size={10} /> Clear
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-[#F9FAFB] text-slate-500 font-semibold border-b border-slate-100">
+                        <tr>
+                          <th className="px-6 py-4 rounded-tl-xl text-center">
                             <input
                               type="checkbox"
-                              checked={selectedIds.includes(entry._id)}
-                              onChange={() => toggleSelect(entry._id)}
+                              checked={processedEntries.length > 0 && selectedIds.length === processedEntries.length}
+                              onChange={toggleSelectAll}
                               className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                             />
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-500 text-xs">
-                                {new Date(entry.date).getDate()}
-                              </div>
-                              <div>
-                                <p className="font-bold text-slate-700">{new Date(entry.date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</p>
-                                {entry.isSpecialDay && <span className="text-[10px] text-rose-500 font-bold bg-rose-50 px-1.5 rounded">Special Day</span>}
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 font-bold text-slate-700">{formatCurrency(entry.otPay)}</td>
-                          <td className="px-6 py-4 font-medium text-slate-500">{entry.hours} hrs</td>
-                          <td className="px-6 py-4 font-bold text-slate-800">{entry.otHours} hrs</td>
-                          <td className="px-6 py-4">
-                            <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${entry.otHours > 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}>
-                              {entry.otHours > 0 ? 'Verified' : 'Regular'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <button onClick={() => handleDelete(entry._id)} className="p-2 hover:bg-red-50 text-slate-300 hover:text-red-500 rounded-lg transition-all">
-                              <Trash2 size={16} />
-                            </button>
-                          </td>
+                          </th>
+                          <th className="px-6 py-4">Date</th>
+                          <th className="px-6 py-4">Total Pay</th>
+                          <th className="px-6 py-4">Hours</th>
+                          <th className="px-6 py-4">OT</th>
+                          <th className="px-6 py-4">Status</th>
+                          <th className="px-6 py-4 text-right">Action</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {filteredEntries.map((entry) => (
+                          <tr key={entry._id} className={`hover:bg-slate-50/50 transition-colors group ${selectedIds.includes(entry._id) ? 'bg-blue-50/30' : ''}`}>
+                            <td className="px-6 py-4 text-center">
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.includes(entry._id)}
+                                onChange={() => toggleSelect(entry._id)}
+                                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                              />
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-500 text-xs">
+                                  {new Date(entry.date).getDate()}
+                                </div>
+                                <div>
+                                  <p className="font-bold text-slate-700">{new Date(entry.date).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</p>
+                                  {entry.isSpecialDay && <span className="text-[10px] text-rose-500 font-bold bg-rose-50 px-1.5 rounded">Special Day</span>}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 font-bold text-slate-700">{formatCurrency(entry.otPay)}</td>
+                            <td className="px-6 py-4 font-medium text-slate-500">{entry.hours} hrs</td>
+                            <td className="px-6 py-4 font-bold text-slate-800">{entry.otHours} hrs</td>
+                            <td className="px-6 py-4">
+                              <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${entry.otHours > 0 ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}>
+                                {entry.otHours > 0 ? 'Verified' : 'Regular'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              <button onClick={() => handleDelete(entry._id)} className="p-2 hover:bg-red-50 text-slate-300 hover:text-red-500 rounded-lg transition-all">
+                                <Trash2 size={16} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              )}
 
 
             </>
