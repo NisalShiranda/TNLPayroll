@@ -13,10 +13,8 @@ app.use(cors());
 app.use(express.json());
 
 // Connect to MongoDB
-mongoose.connect('mongodb://localhost:27017/tnlpayroll', {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-}).then(() => console.log('MongoDB Connected'))
+mongoose.connect('mongodb://localhost:27017/tnlpayroll')
+    .then(() => console.log('MongoDB Connected'))
     .catch(err => console.log(err));
 
 // Routes
