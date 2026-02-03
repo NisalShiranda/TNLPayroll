@@ -74,15 +74,15 @@ body {
 
 /* Day Tiles */
 .react-calendar__tile {
-  padding: 16px 0 !important;
-  /* Taller tiles */
+  padding: 10px 0 !important;
+  /* Reduced padding for smaller shape */
   background: none;
   text-align: center;
   font-weight: 600;
-  font-size: 15px;
+  font-size: 14px;
   color: #334155;
-  border-radius: 16px;
-  /* 100% rounded for circles or large rounded rects */
+  border-radius: 12px;
+  /* Slightly smaller radius */
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   margin-top: 4px;
   /* Space between rows */

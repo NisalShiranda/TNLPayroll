@@ -53,13 +53,33 @@ const App = () => {
   };
 
   const [notification, setNotification] = useState(null);
+  const [billingDate, setBillingDate] = useState(new Date());
 
   const processedEntries = entries.map(e => ({
     ...e,
     ...calculateDailyPay(e, baseSalary)
   })).sort((a, b) => new Date(b.date) - new Date(a.date));
 
-  const totalOT = processedEntries.reduce((acc, curr) => acc + curr.otPay, 0);
+  // Filter entries based on Salary Range: 20th of Prev Month to 19th of Current Month
+  const getBillingRange = (date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    // Example: Feb 2026 (Month 1) -> Start: Jan 20, End: Feb 19
+    const start = new Date(year, month - 1, 20);
+    const end = new Date(year, month, 19, 23, 59, 59);
+    start.setHours(0, 0, 0, 0); // Ensure start is beginning of day
+    return { start, end };
+  };
+
+  const { start: billingStart, end: billingEnd } = getBillingRange(billingDate);
+
+  const filteredEntries = processedEntries.filter(e => {
+    const d = new Date(e.date);
+    // Include 20th and 19th fully
+    return d >= billingStart && d <= billingEnd;
+  });
+
+  const totalOT = filteredEntries.reduce((acc, curr) => acc + curr.otPay, 0);
   const totalPay = Number(baseSalary) + totalOT;
 
   const showNotification = (message, type = 'success') => {
@@ -236,13 +256,22 @@ const App = () => {
             <MetricCard
               title="Monthly Payroll"
               value={formatCurrency(totalPay)}
-              trend="-12.5%"
+              trend="Range: 20th - 19th"
+              isPositive={true}
               icon={<div className="bg-blue-50 text-blue-600 p-2 rounded-lg">$</div>}
+              filter={
+                <input
+                  type="month"
+                  value={billingDate.toISOString().slice(0, 7)}
+                  onChange={(e) => setBillingDate(new Date(e.target.value + '-15'))} // Set to 15th to avoid timezone shift issues on month boundaries
+                  className="bg-slate-50 border-none text-xs font-bold text-slate-500 rounded-lg p-1 outline-none focus:ring-2 focus:ring-blue-100"
+                />
+              }
             />
             <MetricCard
               title="Overtime"
               value={formatCurrency(totalOT)}
-              trend="+5.3%"
+              trend={`${filteredEntries.length} Entries`}
               isPositive
               icon={<div className="bg-indigo-50 text-indigo-600 p-2 rounded-lg"><Calendar size={20} /></div>}
             />
@@ -361,15 +390,18 @@ const NavItem = ({ icon, label, active, onClick }) => (
   </div>
 );
 
-const MetricCard = ({ title, value, trend, isPositive, icon }) => (
+const MetricCard = ({ title, value, trend, isPositive, icon, filter }) => (
   <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all group">
     <div className="flex justify-between items-start mb-4">
       {icon}
-      {trend && (
-        <span className={`px-2 py-1 rounded-lg text-xs font-bold ${isPositive ? 'bg-emerald-50 text-emerald-600' : 'bg-emerald-50 text-emerald-600'}`}>
-          {trend}
-        </span>
-      )}
+      <div className="flex gap-2">
+        {filter}
+        {trend && (
+          <span className={`px-2 py-1 rounded-lg text-xs font-bold ${isPositive ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+            {trend}
+          </span>
+        )}
+      </div>
     </div>
     <h3 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">{title}</h3>
     <p className="text-3xl font-bold text-slate-800 group-hover:text-blue-600 transition-colors">{value}</p>
