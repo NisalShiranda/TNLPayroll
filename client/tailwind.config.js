@@ -1,4 +1,3 @@
-/** @type {import('tailwindcss').Config} */
 export default {
     content: [
         "./index.html",
@@ -7,8 +6,14 @@ export default {
     theme: {
         extend: {
             colors: {
-                primary: '#0F172A', // Slate 900
-                accent: '#3B82F6', // Blue 500
+                primary: '#0f172a', // Slate 900
+                secondary: '#334155', // Slate 700
+                accent: '#2563eb', // Blue 600
+                surface: '#ffffff',
+                background: '#f1f5f9', // Slate 100
+            },
+            fontFamily: {
+                sans: ['Inter', 'system-ui', 'sans-serif'],
             }
         },
     },
