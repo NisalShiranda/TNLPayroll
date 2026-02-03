@@ -39,10 +39,11 @@ const App = () => {
   }, [selectedEmployee?._id]); // Re-fetch when employee changes
 
   const fetchData = async () => {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+    setLoading(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
+    try {
       // 1. Fetch Employees
       const empRes = await fetch(`${API_URL}/employees`, { signal: controller.signal });
       const empData = await empRes.json();
@@ -51,22 +52,29 @@ const App = () => {
         setEmployees(empData);
       } else {
         setEmployees([]);
-        console.error("Fetch employees failed:", empData);
       }
 
-      // 2. Determine Selected Employee (Keep current or Default to first)
+      // 2. Settings (Independent of Employee)
+      let currentSettings = {};
+      try {
+        const settingsRes = await fetch(`${API_URL}/settings`, { signal: controller.signal });
+        if (settingsRes.ok) {
+          currentSettings = await settingsRes.json();
+          setSettings(currentSettings);
+        }
+      } catch (e) { console.warn("Settings fetch error", e); }
+
+      // 3. Employee & Entries
       let currentEmp = selectedEmployee;
       if (!currentEmp && empData.length > 0) {
         currentEmp = empData[0];
         setSelectedEmployee(empData[0]);
       } else if (currentEmp) {
-        // Refresh current employee data (in case salary changed)
         currentEmp = empData.find(e => e._id === currentEmp._id) || empData[0];
         setSelectedEmployee(currentEmp);
       }
 
       if (currentEmp) {
-        // 3. Fetch Entries for Selected Employee
         const entriesRes = await fetch(`${API_URL}/entries?employeeId=${currentEmp._id}`, { signal: controller.signal });
         const entriesData = await entriesRes.json();
         setEntries(entriesData);
@@ -74,10 +82,7 @@ const App = () => {
 
       clearTimeout(timeoutId);
     } catch (error) {
-      if (error.name === 'AbortError') {
-        console.log('Request timed out');
-        return;
-      }
+      if (error.name === 'AbortError') return;
       console.error("Connection error", error);
     } finally {
       setLoading(false);
@@ -145,11 +150,14 @@ const App = () => {
 
   const [notification, setNotification] = useState(null);
   const [billingDate, setBillingDate] = useState(new Date());
+  const [settings, setSettings] = useState({});
 
   const processedEntries = entries.map(e => ({
     ...e,
-    ...calculateDailyPay(e, selectedEmployee?.baseSalary || 30000)
+    ...calculateDailyPay(e, selectedEmployee?.baseSalary || 30000, settings?.otDivisor || 240)
   })).sort((a, b) => new Date(b.date) - new Date(a.date));
+
+
 
   // Filter entries based on Salary Range: 20th of Prev Month to 19th of Current Month
   const getBillingRange = (date) => {
@@ -218,86 +226,188 @@ const App = () => {
     } catch (err) { console.error(err); }
   };
 
-  const handleExportPDF = () => {
+  const handleUpdateSettings = async (newSettings) => {
+    try {
+      // Optimistic update
+      setSettings(prev => ({ ...prev, ...newSettings }));
+
+      const res = await fetch(`${API_URL}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSettings)
+      });
+
+      if (res.ok) {
+        showNotification("Settings saved!");
+      }
+    } catch (err) { console.error(err); }
+  };
+
+  const handleBackupData = () => {
+    const data = {
+      employees,
+      entries,
+      settings
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tnl_payroll_backup_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showNotification("Backup downloaded!");
+  };
+
+  const handleExportPDF = (customStart = null, customEnd = null) => {
     const doc = new jsPDF();
 
+    // Use custom range if provided, otherwise fallback to billing cycle
+    const start = customStart || billingStart;
+    const end = customEnd || billingEnd;
+
+    // -- COLORS --
+    const primaryColor = [15, 23, 42]; // Slate-900
+    const accentColor = [37, 99, 235]; // Blue-600
+    const lightGray = [248, 250, 252]; // Slate-50
+
     // -- 1. HEADER --
-    doc.setFontSize(22);
-    doc.text('TNL Garments', 105, 20, { align: 'center' });
-    doc.setFontSize(14);
-    doc.text('Salary Statement', 105, 28, { align: 'center' });
-
-    doc.setLineWidth(0.5);
-    doc.line(14, 32, 196, 32);
-
-    // -- 2. EMPLOYEE & PERIOD INFO --
-    doc.setFontSize(10);
-    doc.text(`Employee Name: ${selectedEmployee?.name || 'N/A'}`, 14, 40);
-
-    let periodText = `${billingStart.toLocaleDateString()} to ${billingEnd.toLocaleDateString()}`;
-    if (filterStartDate && filterEndDate) {
-      periodText = `${filterStartDate} to ${filterEndDate}`;
+    // Add Logo
+    try {
+      doc.addImage(logo, 'PNG', 15, 12, 24, 24);
+    } catch (e) {
+      console.warn("Logo add failed", e);
     }
-    doc.text(`Pay Period: ${periodText}`, 14, 46);
-    doc.text(`Generated On: ${new Date().toLocaleDateString()}`, 14, 52);
 
-    // -- 3. CALCULATIONS --
-    const dataToExport = selectedIds.length > 0
-      ? filteredEntries.filter(e => selectedIds.includes(e._id))
-      : filteredEntries;
+    // Company Name & Title
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(24);
+    doc.setTextColor(...primaryColor);
+    doc.text(settings?.companyName || 'TNL Garments', 45, 20);
 
-    const normalOT = dataToExport.filter(e => !e.isSpecialDay).reduce((acc, curr) => acc + curr.otPay, 0);
-    const specialOT = dataToExport.filter(e => e.isSpecialDay).reduce((acc, curr) => acc + curr.otPay, 0);
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.setFont("helvetica", "normal");
+    doc.text(settings?.companyAddress || '123 Garment Factory Rd, Colombo', 45, 25);
+    const contactInfo = `Email: ${settings?.companyEmail || 'info@tnlgarments.com'} | Tel: ${settings?.companyPhone || '+94 11 234 5678'}`;
+    doc.text(contactInfo, 45, 30);
+
+    doc.setFontSize(16);
+    doc.setTextColor(...accentColor);
+    doc.setFont("helvetica", "bold");
+    doc.text('Salary Sheet', 196, 20, { align: 'right' });
+
+    // Divider
+    doc.setLineWidth(0.5);
+    doc.setDrawColor(200);
+    doc.line(14, 38, 196, 38);
+
+    // -- 2. EMPLOYEE & PERIOD INFO BOX --
+    doc.setFillColor(...lightGray);
+    doc.roundedRect(14, 45, 182, 24, 2, 2, 'F');
+
+    doc.setFontSize(11);
+    doc.setTextColor(...primaryColor);
+    doc.text(`Employee:`, 20, 54);
+    doc.setFont("helvetica", "normal");
+    doc.text(selectedEmployee?.name || 'N/A', 50, 54);
+
+    doc.setFont("helvetica", "bold");
+    doc.text(`Pay Period:`, 20, 62);
+    doc.setFont("helvetica", "normal");
+    const periodText = `${start.toLocaleDateString()} to ${end.toLocaleDateString()}`;
+    doc.text(periodText, 50, 62);
+
+    doc.setFont("helvetica", "bold");
+    doc.text(`Generated:`, 120, 54);
+    doc.setFont("helvetica", "normal");
+    doc.text(new Date().toLocaleDateString(), 145, 54);
+
+    // -- 3. CALCULATIONS (WITH NaN FIX) --
+    let dataToExport;
+    if (customStart && customEnd) {
+      dataToExport = entries.filter(e => {
+        const d = new Date(e.date);
+        return d >= start && d <= end;
+      });
+    } else {
+      dataToExport = selectedIds.length > 0
+        ? filteredEntries.filter(e => selectedIds.includes(e._id))
+        : filteredEntries;
+    }
+
+    // FIX: Add Safe Number Conversion for Reduce
+    const normalOT = dataToExport.filter(e => !e.isSpecialDay).reduce((acc, curr) => acc + (Number(curr.otPay) || 0), 0);
+    const specialOT = dataToExport.filter(e => e.isSpecialDay).reduce((acc, curr) => acc + (Number(curr.otPay) || 0), 0);
     const totalOTSum = normalOT + specialOT;
 
     const baseSal = Number(selectedEmployee?.baseSalary || 0);
-    const bonusVal = Number(bonus);
-    const advanceVal = Number(advance);
+    const bonusVal = customStart ? 0 : Number(bonus);
+    const advanceVal = customStart ? 0 : Number(advance);
     const netSalary = baseSal + totalOTSum + bonusVal - advanceVal;
 
     // -- 4. SALARY SUMMARY TABLE --
     autoTable(doc, {
-      startY: 60,
-      head: [['Description', 'Amount (LKR)']],
+      startY: 80,
+      head: [['Earnings / Deductions', 'Amount (LKR)']],
       body: [
         ['Base Salary', formatCurrency(baseSal).replace('LKR', '').trim()],
-        ['OT (Normal Days)', formatCurrency(normalOT).replace('LKR', '').trim()],
-        ['OT (Special Days)', formatCurrency(specialOT).replace('LKR', '').trim()],
+        ['OT Pay (Normal Days)', formatCurrency(normalOT).replace('LKR', '').trim()],
+        ['OT Pay (Special Days)', formatCurrency(specialOT).replace('LKR', '').trim()],
         ['Bonus', formatCurrency(bonusVal).replace('LKR', '').trim()],
         ['Advance (Deduction)', `(${formatCurrency(advanceVal).replace('LKR', '').trim()})`],
-        [{ content: 'NET SALARY', styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } }, { content: formatCurrency(netSalary).replace('LKR', '').trim(), styles: { fontStyle: 'bold', fillColor: [240, 240, 240] } }]
+        [{ content: 'NET SALARY PAYABLE', styles: { fontStyle: 'bold', fontSize: 12, textColor: [255, 255, 255], fillColor: primaryColor } },
+        { content: formatCurrency(netSalary).replace('LKR', '').trim(), styles: { fontStyle: 'bold', fontSize: 12, textColor: [255, 255, 255], fillColor: primaryColor, halign: 'right' } }]
       ],
       theme: 'grid',
-      headStyles: { fillColor: [41, 128, 185], halign: 'center' },
+      headStyles: { fillColor: accentColor, halign: 'left', fontStyle: 'bold' },
       columnStyles: {
-        0: { cellWidth: 100 },
-        1: { halign: 'right' }
+        0: { cellWidth: 120 },
+        1: { halign: 'right', fontStyle: 'bold' }
       },
-      styles: { fontSize: 10 }
+      styles: { fontSize: 10, cellPadding: 6 }
     });
 
     // -- 5. ATTENDANCE DETAILS TABLE --
-    doc.text('Attendance & OT Details', 14, doc.lastAutoTable.finalY + 15);
+    doc.setFontSize(12);
+    doc.setTextColor(...primaryColor);
+    doc.text('Attendance & Overtime Details', 14, doc.lastAutoTable.finalY + 14);
 
-    const tableColumn = ["Date", "Status", "Hours", "OT Hours", "OT Pay"];
+    const tableColumn = ["Date", "Status", "Work Hours", "OT Hours", "OT Earnings"];
     const exportRows = dataToExport.map(entry => [
       new Date(entry.date).toLocaleDateString(),
       entry.isSpecialDay ? "Special Day" : "Normal",
-      entry.hours,
-      entry.otHours,
-      formatCurrency(entry.otPay).replace('LKR', '').trim()
+      entry.hours || '-',
+      entry.otHours || '0',
+      formatCurrency(Number(entry.otPay) || 0).replace('LKR', '').trim()
     ]);
 
     autoTable(doc, {
-      startY: doc.lastAutoTable.finalY + 20,
+      startY: doc.lastAutoTable.finalY + 18,
       head: [tableColumn],
       body: exportRows,
-      theme: 'grid',
-      styles: { fontSize: 9 },
-      headStyles: { fillColor: [100, 116, 139] }
+      theme: 'striped',
+      styles: { fontSize: 9, cellPadding: 3 },
+      headStyles: { fillColor: [100, 116, 139] },
+      columnStyles: {
+        4: { halign: 'right' }
+      }
     });
 
-    doc.save(`Salary_Sheet_${selectedEmployee?.name || 'Employee'}.pdf`);
+    // -- 6. FOOTER --
+    const pageHeight = doc.internal.pageSize.height;
+    doc.setDrawColor(150);
+    doc.line(14, pageHeight - 30, 60, pageHeight - 30);
+    doc.setFontSize(8);
+    doc.text("Authorized Signature", 14, pageHeight - 25);
+
+    doc.text("Generated by TNL Payroll System", 196, pageHeight - 10, { align: 'right' });
+
+
+    // Use 'start' date to determine the month name for the file
+    const monthName = start.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).replace(/ /g, '_');
+    const safeEmpName = (selectedEmployee?.name || 'Employee').replace(/ /g, '_');
+    doc.save(`Salary_Sheet_${monthName}_${safeEmpName}.pdf`);
   };
 
   const toggleSelect = (id) => {
@@ -379,10 +489,10 @@ const App = () => {
 
         <nav className="flex-1 px-4 py-6 space-y-2">
           <NavItem icon={<LayoutDashboard size={20} />} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-          <NavItem icon={<Users size={20} />} label="Employee" active={activeTab === 'employees'} onClick={() => setActiveTab('employees')} />
           <NavItem icon={<Calendar size={20} />} label="Payroll" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
-          <NavItem icon={<FileText size={20} />} label="Report" />
-          <NavItem icon={<Settings size={20} />} label="Settings" />
+          <NavItem icon={<Users size={20} />} label="Employee" active={activeTab === 'employees'} onClick={() => setActiveTab('employees')} />
+          <NavItem icon={<FileText size={20} />} label="Report" active={activeTab === 'report'} onClick={() => setActiveTab('report')} />
+          <NavItem icon={<Settings size={20} />} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
         </nav>
 
         <div className="p-6 border-t border-slate-50">
@@ -430,15 +540,7 @@ const App = () => {
             </div>
           </div>
           <div className="flex items-center gap-6">
-            <div className="relative hidden md:block">
-              <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
-              <input type="text" placeholder="Search..." className="pl-10 pr-4 py-2 bg-slate-50 rounded-lg text-sm border-none focus:ring-2 focus:ring-blue-100 outline-none w-64" />
-            </div>
-            <div className="flex gap-3">
-              <button className="p-2 text-slate-400 hover:text-slate-600 bg-slate-50 rounded-full">
-                <Bell size={20} />
-              </button>
-            </div>
+            {/* Search and Bell removed as per request */}
           </div>
         </header>
 
@@ -555,36 +657,40 @@ const App = () => {
               )}
 
               {/* METRICS ROW */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <MetricCard
-                  title="Monthly Payroll"
-                  value={formatCurrency(totalPay)}
-                  trend="Range: 20th - 19th"
-                  isPositive={true}
-                  icon={<div className="bg-blue-50 text-blue-600 p-2 rounded-lg">$</div>}
-                  filter={
-                    <input
-                      type="month"
-                      value={billingDate.toISOString().slice(0, 7)}
-                      onChange={(e) => setBillingDate(new Date(e.target.value + '-15'))} // Set to 15th to avoid timezone shift issues on month boundaries
-                      className="bg-slate-50 border-none text-xs font-bold text-slate-500 rounded-lg p-1 outline-none focus:ring-2 focus:ring-blue-100"
-                    />
-                  }
-                />
-                <MetricCard
-                  title="Overtime"
-                  value={formatCurrency(totalOT)}
-                  trend={`${filteredEntries.length} Entries`}
-                  isPositive
-                  icon={<div className="bg-indigo-50 text-indigo-600 p-2 rounded-lg"><Calendar size={20} /></div>}
-                />
-                <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
-                  <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">Base Salary Config</p>
-                  <div className="relative z-10">
-                    <CurrencyInput value={selectedEmployee?.baseSalary || 0} onChange={handleSalaryChange} label="" />
+
+              {/* METRICS ROW (Hide on Settings Tab) */}
+              {activeTab !== 'settings' && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <MetricCard
+                    title="Monthly Payroll"
+                    value={formatCurrency(totalPay)}
+                    trend="Range: 20th - 19th"
+                    isPositive={true}
+                    icon={<div className="bg-blue-50 text-blue-600 p-2 rounded-lg">$</div>}
+                    filter={
+                      <input
+                        type="month"
+                        value={billingDate.toISOString().slice(0, 7)}
+                        onChange={(e) => setBillingDate(new Date(e.target.value + '-15'))} // Set to 15th to avoid timezone shift issues on month boundaries
+                        className="bg-slate-50 border-none text-xs font-bold text-slate-500 rounded-lg p-1 outline-none focus:ring-2 focus:ring-blue-100"
+                      />
+                    }
+                  />
+                  <MetricCard
+                    title="Overtime"
+                    value={formatCurrency(totalOT)}
+                    trend={`${filteredEntries.length} Entries`}
+                    isPositive
+                    icon={<div className="bg-indigo-50 text-indigo-600 p-2 rounded-lg"><Calendar size={20} /></div>}
+                  />
+                  <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
+                    <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">Base Salary Config</p>
+                    <div className="relative z-10">
+                      <CurrencyInput value={selectedEmployee?.baseSalary || 0} onChange={handleSalaryChange} label="" />
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
 
 
 
@@ -791,6 +897,208 @@ const App = () => {
               )}
 
 
+              {/* REPORT TAB */}
+              {activeTab === 'report' && (
+                <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden animate-fade-in">
+                  <div className="p-6 border-b border-slate-50">
+                    <h3 className="text-lg font-bold text-slate-800">Monthly Salary History</h3>
+                    <p className="text-slate-400 text-xs mt-1">Download past salary sheets for {selectedEmployee?.name}</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-[#F9FAFB] text-slate-500 font-semibold border-b border-slate-100">
+                        <tr>
+                          <th className="px-6 py-4">Month</th>
+                          <th className="px-6 py-4">Total Days</th>
+                          <th className="px-6 py-4">Total OT</th>
+                          <th className="px-6 py-4">Base Salary</th>
+                          <th className="px-6 py-4">Est. Net Pay (Base + OT)</th>
+                          <th className="px-6 py-4 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {Array.from({ length: 12 }).map((_, i) => {
+                          const d = new Date();
+                          d.setMonth(d.getMonth() - i);
+                          // Calculate start/end for this month (20th prev - 19th current logic or just calendar month?)
+                          // Using Calendar Month for simplicity in reports unless specified otherwise
+                          // Actually, app uses 20th-19th. Let's try to approximate that or just use calendar month for the "History" list to be clean.
+                          // User said "each months salary sheets".
+                          // Let's stick to the App's billing cycle logic: 20th of Prev Month to 19th of Current Month.
+
+                          const year = d.getFullYear();
+                          const month = d.getMonth(); // 0-11
+
+                          // Billing Cycle: 20th of (Month-1) to 19th of (Month)
+                          // Example: Report for "February" covers Jan 20 - Feb 19.
+                          const start = new Date(year, month - 1, 20);
+                          const end = new Date(year, month, 19);
+
+                          const monthLabel = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+                          // Filter entries for this period
+                          const monthEntries = entries.filter(e => {
+                            const eDate = new Date(e.date);
+                            return eDate >= start && eDate <= end;
+                          });
+
+                          const otPay = monthEntries.reduce((acc, curr) => acc + (Number(curr.otPay) || 0), 0);
+                          const otHours = monthEntries.reduce((acc, curr) => acc + (Number(curr.otHours) || 0), 0);
+                          const base = Number(selectedEmployee?.baseSalary || 0);
+                          const estTotal = base + otPay; // Bonus/Advance unknown for history
+
+                          return (
+                            <tr key={i} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="px-6 py-4 font-bold text-slate-700">{monthLabel}</td>
+                              <td className="px-6 py-4 text-slate-600">{monthEntries.length} Days</td>
+                              <td className="px-6 py-4 font-blue-600 font-bold">{formatCurrency(otPay)} <span className="text-slate-400 text-xs font-normal">({otHours} hrs)</span></td>
+                              <td className="px-6 py-4 text-slate-600">{formatCurrency(base)}</td>
+                              <td className="px-6 py-4 font-bold text-emerald-600">{formatCurrency(estTotal)}*</td>
+                              <td className="px-6 py-4 text-right">
+                                <button
+                                  onClick={() => handleExportPDF(start, end)}
+                                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-800 text-white text-xs font-bold rounded-lg hover:bg-slate-700 transition-colors"
+                                >
+                                  <Download size={14} /> Download
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="p-4 bg-slate-50 text-xs text-slate-400 text-center">
+                    * Estimated Net Pay does not include historic Bonus/Advance data.
+                  </div>
+                </div>
+              )}
+
+
+              {/* SETTINGS TAB */}
+              {activeTab === 'settings' && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in">
+
+                  {/* 1. COMPANY PROFILE */}
+                  <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
+                        <Settings size={20} />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-800">Company Profile</h3>
+                        <p className="text-xs text-slate-400">Details for your PDF Salary Sheets</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Company Name</label>
+                        <input
+                          type="text"
+                          value={settings.companyName || ''}
+                          onChange={e => setSettings({ ...settings, companyName: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Address</label>
+                        <input
+                          type="text"
+                          value={settings.companyAddress || ''}
+                          onChange={e => setSettings({ ...settings, companyAddress: e.target.value })}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Phone</label>
+                          <input
+                            type="text"
+                            value={settings.companyPhone || ''}
+                            onChange={e => setSettings({ ...settings, companyPhone: e.target.value })}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Email</label>
+                          <input
+                            type="text"
+                            value={settings.companyEmail || ''}
+                            onChange={e => setSettings({ ...settings, companyEmail: e.target.value })}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleUpdateSettings(settings)}
+                        className="w-full bg-slate-800 text-white font-bold py-3 rounded-xl hover:bg-slate-700 transition-colors mt-2"
+                      >
+                        Save Company Details
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    {/* 2. PAYROLL CONFIG */}
+                    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                      <h3 className="text-lg font-bold text-slate-800 mb-4">Payroll Configuration</h3>
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">OT Divisor</label>
+                            <input
+                              type="number"
+                              value={settings.otDivisor || 240}
+                              onChange={e => setSettings({ ...settings, otDivisor: Number(e.target.value) })}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">Standard is 240 (Hourly = Base/240)</p>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Currency</label>
+                            <input
+                              type="text"
+                              value={settings.currency || 'LKR'}
+                              onChange={e => setSettings({ ...settings, currency: e.target.value })}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Billing Cycle Start Day</label>
+                          <input
+                            type="number"
+                            value={settings.billingStartDay || 20}
+                            onChange={e => setSettings({ ...settings, billingStartDay: Number(e.target.value) })}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          <p className="text-[10px] text-slate-400 mt-1">Day of previous month when cycle starts (Default: 20)</p>
+                        </div>
+                        <button
+                          onClick={() => handleUpdateSettings(settings)}
+                          className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl hover:bg-blue-500 transition-colors"
+                        >
+                          Update Configuration
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 3. DATE TOOLS */}
+                    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm border-l-4 border-l-purple-500">
+                      <h3 className="text-lg font-bold text-slate-800 mb-2">Data Management</h3>
+                      <p className="text-sm text-slate-500 mb-4">Download a full backup of all employees, entries, and settings.</p>
+                      <button
+                        onClick={handleBackupData}
+                        className="flex items-center justify-center gap-2 w-full bg-purple-50 text-purple-600 font-bold py-3 rounded-xl hover:bg-purple-100 transition-colors"
+                      >
+                        <Download size={18} /> Download JSON Backup
+                      </button>
+                    </div>
+                  </div>
+
+                </div>
+              )}
             </>
           )}
 

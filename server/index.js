@@ -134,7 +134,13 @@ app.get('/api/settings', async (req, res) => {
     try {
         let settings = await Settings.findOne();
         if (!settings) {
-            settings = new Settings({ baseSalary: 30000 });
+            settings = new Settings({
+                baseSalary: 30000,
+                companyName: 'TNL Garments',
+                otDivisor: 240,
+                currency: 'LKR',
+                billingStartDay: 20
+            });
             await settings.save();
         }
         res.json(settings);
@@ -150,7 +156,16 @@ app.put('/api/settings', async (req, res) => {
         if (!settings) {
             settings = new Settings();
         }
-        settings.baseSalary = req.body.baseSalary;
+        // Update all fields
+        settings.companyName = req.body.companyName ?? settings.companyName;
+        settings.companyAddress = req.body.companyAddress ?? settings.companyAddress;
+        settings.companyPhone = req.body.companyPhone ?? settings.companyPhone;
+        settings.companyEmail = req.body.companyEmail ?? settings.companyEmail;
+        settings.baseSalary = req.body.baseSalary ?? settings.baseSalary;
+        settings.otDivisor = req.body.otDivisor ?? settings.otDivisor;
+        settings.currency = req.body.currency ?? settings.currency;
+        settings.billingStartDay = req.body.billingStartDay ?? settings.billingStartDay;
+
         await settings.save();
         res.json(settings);
     } catch (err) {

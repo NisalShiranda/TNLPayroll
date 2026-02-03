@@ -19,9 +19,10 @@ export const calculateDuration = (start, end) => {
     return diff;
 };
 
-export const calculateDailyPay = (entry, baseSalary) => {
+export const calculateDailyPay = (entry, baseSalary, otDivisor = 240) => {
     // Normal Hour Rate
-    const R = (baseSalary / 30) / 8;
+    // Hourly Rate = Base / Divisor (e.g. 30000 / 240 = 125)
+    const R = baseSalary / otDivisor;
 
     // Parse times
     const totalWorkDuration = calculateDuration(entry.checkIn, entry.checkOut);
