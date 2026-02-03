@@ -1,37 +1,65 @@
 import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, Users, FileText, Settings, Bell, Search, Plus, Trash2, Calendar, Download } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import CurrencyInput from './components/CurrencyInput';
 import TimeCard from './components/TimeCard';
 import CalendarWidget from './components/CalendarWidget';
+import EmployeeModal from './components/EmployeeModal';
 import { calculateDailyPay, formatCurrency } from './utils/calculations';
 import logo from './assets/logo.png';
 
 const App = () => {
-  const [baseSalary, setBaseSalary] = useState(30000);
+  const [employees, setEmployees] = useState([]);
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [showEmployeeModal, setShowEmployeeModal] = useState(false);
+
+  // const [baseSalary, setBaseSalary] = useState(30000); // Now derived from selectedEmployee
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showEntryForm, setShowEntryForm] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedIds, setSelectedIds] = useState([]);
+  // const [viewMode, setViewMode] = useState('list'); // REMOVED
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'verified', 'regular'
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
 
   const API_URL = 'http://localhost:5000/api';
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [selectedEmployee?._id]); // Re-fetch when employee changes
 
   const fetchData = async () => {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-      const settingsRes = await fetch(`${API_URL}/settings`, { signal: controller.signal });
-      const settingsData = await settingsRes.json();
-      setBaseSalary(settingsData.baseSalary || 30000);
+      // 1. Fetch Employees
+      const empRes = await fetch(`${API_URL}/employees`, { signal: controller.signal });
+      const empData = await empRes.json();
+      setEmployees(empData);
 
-      const entriesRes = await fetch(`${API_URL}/entries`, { signal: controller.signal });
-      const entriesData = await entriesRes.json();
-      setEntries(entriesData);
+      // 2. Determine Selected Employee (Keep current or Default to first)
+      let currentEmp = selectedEmployee;
+      if (!currentEmp && empData.length > 0) {
+        currentEmp = empData[0];
+        setSelectedEmployee(empData[0]);
+      } else if (currentEmp) {
+        // Refresh current employee data (in case salary changed)
+        currentEmp = empData.find(e => e._id === currentEmp._id) || empData[0];
+        setSelectedEmployee(currentEmp);
+      }
+
+      if (currentEmp) {
+        // 3. Fetch Entries for Selected Employee
+        const entriesRes = await fetch(`${API_URL}/entries?employeeId=${currentEmp._id}`, { signal: controller.signal });
+        const entriesData = await entriesRes.json();
+        setEntries(entriesData);
+      }
 
       clearTimeout(timeoutId);
     } catch (error) {
@@ -42,13 +70,37 @@ const App = () => {
   };
 
   const handleSalaryChange = async (val) => {
-    setBaseSalary(val);
+    if (!selectedEmployee) return;
+
+    // Optimistic Update
+    const updatedEmp = { ...selectedEmployee, baseSalary: val };
+    setSelectedEmployee(updatedEmp);
+    setEmployees(prev => prev.map(e => e._id === updatedEmp._id ? updatedEmp : e));
+
     try {
-      await fetch(`${API_URL}/settings`, {
+      await fetch(`${API_URL}/employees/${selectedEmployee._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ baseSalary: val })
       });
+    } catch (err) { console.error(err); }
+  };
+
+  const handleCreateEmployee = async (empData) => {
+    try {
+      const res = await fetch(`${API_URL}/employees`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(empData)
+      });
+      if (res.ok) {
+        const newEmp = await res.json();
+        setEmployees(prev => [...prev, newEmp]);
+        setSelectedEmployee(newEmp); // Switch to new employee
+        setEntries([]); // Clear entries for new employee
+        showNotification(`Employee ${newEmp.name} created!`);
+        fetchData(); // Refresh to be sure
+      }
     } catch (err) { console.error(err); }
   };
 
@@ -57,7 +109,7 @@ const App = () => {
 
   const processedEntries = entries.map(e => ({
     ...e,
-    ...calculateDailyPay(e, baseSalary)
+    ...calculateDailyPay(e, selectedEmployee?.baseSalary || 30000)
   })).sort((a, b) => new Date(b.date) - new Date(a.date));
 
   // Filter entries based on Salary Range: 20th of Prev Month to 19th of Current Month
@@ -75,12 +127,32 @@ const App = () => {
 
   const filteredEntries = processedEntries.filter(e => {
     const d = new Date(e.date);
-    // Include 20th and 19th fully
-    return d >= billingStart && d <= billingEnd;
+
+    // DATE FILTER LOGIC:
+    // If Custom Date Range is set, use it.
+    // Otherwise, default to the Billing Range (20th - 19th)
+    let inRange = false;
+    if (filterStartDate && filterEndDate) {
+      const start = new Date(filterStartDate);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(filterEndDate);
+      end.setHours(23, 59, 59, 999);
+      inRange = d >= start && d <= end;
+    } else {
+      inRange = d >= billingStart && d <= billingEnd;
+    }
+
+    // Status Filter
+    if (filterStatus === 'all') return inRange;
+    if (filterStatus === 'verified') return inRange && e.otHours > 0;
+    if (filterStatus === 'regular') return inRange && e.otHours === 0;
+
+    return inRange;
   });
 
   const totalOT = filteredEntries.reduce((acc, curr) => acc + curr.otPay, 0);
-  const totalPay = Number(baseSalary) + totalOT;
+
+  const totalPay = Number(selectedEmployee?.baseSalary || 0) + totalOT;
 
   const showNotification = (message, type = 'success') => {
     setNotification({ message, type });
@@ -95,19 +167,67 @@ const App = () => {
       const res = await fetch(url, {
         method: method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(entry)
+        body: JSON.stringify({ ...entry, employeeId: selectedEmployee._id })
       });
       if (res.ok) {
         fetchData();
         setShowEntryForm(false);
         // Calculate estimated pay for feedback
-        const calc = calculateDailyPay(entry, baseSalary);
+        const calc = calculateDailyPay(entry, selectedEmployee?.baseSalary);
         showNotification(entry._id ? `Entry Updated!` : `Entry Added! Earned: ${formatCurrency(calc.otPay)} OT`);
       }
     } catch (err) { console.error(err); }
   };
 
-  const [selectedIds, setSelectedIds] = useState([]);
+  const handleExportPDF = () => {
+    const doc = new jsPDF();
+
+    // Title
+    doc.setFontSize(18);
+    doc.text('TNL Garments - Payroll Report', 14, 20);
+    doc.setFontSize(10);
+    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 28);
+
+    // Period Info
+    let periodText = `Billing Period: ${billingStart.toLocaleDateString()} - ${billingEnd.toLocaleDateString()}`;
+    if (filterStartDate && filterEndDate) {
+      periodText = `Custom Period: ${filterStartDate} - ${filterEndDate}`;
+    }
+    doc.text(periodText, 14, 34);
+
+    // Table
+    const tableColumn = ["Date", "Status", "Hours Worked", "OT Hours", "OT Pay (LKR)"];
+
+    // Use selected rows if any, otherwise all filtered rows
+    const dataToExport = selectedIds.length > 0
+      ? filteredEntries.filter(e => selectedIds.includes(e._id))
+      : filteredEntries;
+
+    const exportRows = dataToExport.map(entry => [
+      new Date(entry.date).toLocaleDateString(),
+      entry.isSpecialDay ? "Special Day" : "Normal Day",
+      entry.hours,
+      entry.otHours,
+      formatCurrency(entry.otPay).replace('LKR', '').trim()
+    ]);
+
+    autoTable(doc, {
+      startY: 40,
+      head: [tableColumn],
+      body: exportRows,
+      theme: 'grid',
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [16, 185, 129] } // Emerald Green
+    });
+
+    // Summary
+    const finalY = doc.lastAutoTable.finalY + 10;
+    const totalOTSum = dataToExport.reduce((acc, curr) => acc + curr.otPay, 0);
+    doc.setFontSize(12);
+    doc.text(`Total OT Pay: ${formatCurrency(totalOTSum)}`, 14, finalY);
+
+    doc.save('tnl-payroll-report.pdf');
+  };
 
   const toggleSelect = (id) => {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
@@ -189,6 +309,37 @@ const App = () => {
         <header className="bg-white border-b border-slate-100 h-20 flex items-center justify-between px-8 sticky top-0 z-40">
           <div className="flex items-center gap-4">
             <h1 className="text-2xl font-bold text-slate-800">Payroll</h1>
+
+            {/* EMPLOYEE SELECTOR */}
+            <div className="flex items-center gap-2 ml-4 bg-slate-50 p-1 rounded-xl border border-slate-200">
+              <select
+                value={selectedEmployee?._id || ''}
+                onChange={(e) => {
+                  const emp = employees.find(emp => emp._id === e.target.value);
+                  setSelectedEmployee(emp);
+                  // Trigger fetch immediately for new user
+                  // (useEffect dep or manual fetch call needed - simplified by useEffect on selectedEmployee change if we added it, but let's just reload or let the next render cycle handle it if we add selectedEmployee to useEffect dep. 
+                  // Better: Just set state and let useEffect handle it if added, OR call fetchData manually.
+                  // Let's add useEffect for selectedEmployee or modify fetchData flow. 
+                  // Actually, fetchData relies on state. Best to just reload entries:
+                  // fetchEntriesFor(emp._id)
+                }}
+                // Actually better to have useEffect depend on selectedEmployee? 
+                // Let's stick to the fetchData flow.
+                className="bg-transparent text-sm font-bold text-slate-700 outline-none px-2 py-1 cursor-pointer min-w-[150px]"
+              >
+                {employees.map(emp => (
+                  <option key={emp._id} value={emp._id}>{emp.name}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => setShowEmployeeModal(true)}
+                className="p-1.5 bg-white rounded-lg shadow-sm text-blue-600 hover:bg-blue-50 transition-colors"
+                title="Add New Employee"
+              >
+                <Plus size={16} />
+              </button>
+            </div>
           </div>
           <div className="flex items-center gap-6">
             <div className="relative hidden md:block">
@@ -278,7 +429,10 @@ const App = () => {
             <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-md transition-all">
               <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">Base Salary Config</p>
               <div className="relative z-10">
-                <CurrencyInput value={baseSalary} onChange={handleSalaryChange} label="" />
+                <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-2">Base Salary Config</p>
+                <div className="relative z-10">
+                  <CurrencyInput value={selectedEmployee?.baseSalary || 0} onChange={handleSalaryChange} label="" />
+                </div>
               </div>
             </div>
           </div>
@@ -287,26 +441,79 @@ const App = () => {
 
           {/* DATA TABLE */}
           <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-            <div className="p-6 border-b border-slate-50 flex justify-between items-center">
-              <div className="flex items-center gap-3">
-                <h3 className="text-lg font-bold text-slate-800">Payroll Entries</h3>
-                {selectedIds.length > 0 && (
+            <div className="p-6 border-b border-slate-50 flex flex-col gap-4">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-lg font-bold text-slate-800">Payroll Entries</h3>
+                  {selectedIds.length > 0 && (
+                    <button
+                      onClick={handleBulkDelete}
+                      className="flex items-center gap-2 bg-rose-50 text-rose-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-rose-100 transition-colors animate-fade-in"
+                    >
+                      <Trash2 size={14} />
+                      <span>Delete {selectedIds.length} Selected</span>
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-2">
                   <button
-                    onClick={handleBulkDelete}
-                    className="flex items-center gap-2 bg-rose-50 text-rose-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-rose-100 transition-colors animate-fade-in"
+                    onClick={handleExportPDF}
+                    className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors shadow-sm"
                   >
-                    <Trash2 size={14} />
-                    <span>Delete {selectedIds.length} Selected</span>
+                    <Download size={14} />
+                    Export PDF
                   </button>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <button className="px-3 py-1.5 text-xs font-bold border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">Filter</button>
-                <div className="flex bg-slate-50 rounded-lg p-1 border border-slate-100">
-                  <button className="p-1 bg-white shadow-sm rounded-md"><LayoutDashboard size={14} /></button>
-                  <button className="p-1 text-slate-400"><FileText size={14} /></button>
+                  <button
+                    onClick={() => setShowFilters(!showFilters)}
+                    className={`px-3 py-1.5 text-xs font-bold border rounded-lg hover:bg-slate-50 transition-colors ${showFilters ? 'bg-blue-50 border-blue-200 text-blue-600' : 'border-slate-200 text-slate-600'}`}
+                  >
+                    Filter
+                  </button>
                 </div>
               </div>
+
+              {/* Filter Bar */}
+              {showFilters && (
+                <div className="animate-fade-in flex flex-wrap items-center gap-4 p-4 bg-slate-50/50 rounded-xl border border-slate-100">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Status</span>
+                    <div className="flex bg-white rounded-lg p-1 border border-slate-200 shadow-sm">
+                      <button onClick={() => setFilterStatus('all')} className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${filterStatus === 'all' ? 'bg-slate-800 text-white shadow' : 'text-slate-500 hover:bg-slate-50'}`}>All</button>
+                      <button onClick={() => setFilterStatus('verified')} className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${filterStatus === 'verified' ? 'bg-emerald-500 text-white shadow' : 'text-slate-500 hover:bg-slate-50'}`}>Verified</button>
+                      <button onClick={() => setFilterStatus('regular')} className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${filterStatus === 'regular' ? 'bg-slate-500 text-white shadow' : 'text-slate-500 hover:bg-slate-50'}`}>Regular</button>
+                    </div>
+                  </div>
+
+                  <div className="w-px h-8 bg-slate-200 hidden md:block"></div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Date Range</span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        value={filterStartDate}
+                        onChange={(e) => setFilterStartDate(e.target.value)}
+                        className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-600 outline-none focus:ring-2 focus:ring-blue-100 shadow-sm"
+                      />
+                      <span className="text-slate-300 font-bold">-</span>
+                      <input
+                        type="date"
+                        value={filterEndDate}
+                        onChange={(e) => setFilterEndDate(e.target.value)}
+                        className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-600 outline-none focus:ring-2 focus:ring-blue-100 shadow-sm"
+                      />
+                      {(filterStartDate || filterEndDate) && (
+                        <button
+                          onClick={() => { setFilterStartDate(''); setFilterEndDate(''); }}
+                          className="text-[10px] items-center text-rose-500 font-bold hover:underline flex gap-1"
+                        >
+                          <Trash2 size={10} /> Clear
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="overflow-x-auto">
@@ -330,7 +537,7 @@ const App = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {processedEntries.map((entry) => (
+                  {filteredEntries.map((entry) => (
                     <tr key={entry._id} className={`hover:bg-slate-50/50 transition-colors group ${selectedIds.includes(entry._id) ? 'bg-blue-50/30' : ''}`}>
                       <td className="px-6 py-4 text-center">
                         <input
@@ -373,6 +580,12 @@ const App = () => {
 
         </div>
       </main>
+
+      <EmployeeModal
+        isOpen={showEmployeeModal}
+        onClose={() => setShowEmployeeModal(false)}
+        onSave={handleCreateEmployee}
+      />
     </div>
   );
 };

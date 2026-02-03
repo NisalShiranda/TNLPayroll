@@ -5,6 +5,7 @@ require('dotenv').config();
 
 const TimeEntry = require('./models/TimeEntry');
 const Settings = require('./models/Settings');
+const Employee = require('./models/Employee');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -20,10 +21,12 @@ mongoose.connect(MONGO_URI)
 
 // Routes
 
-// Get all entries
+// Get all entries (Filtered by Employee)
 app.get('/api/entries', async (req, res) => {
     try {
-        const entries = await TimeEntry.find().sort({ date: -1 });
+        const { employeeId } = req.query;
+        const query = employeeId ? { employeeId } : {};
+        const entries = await TimeEntry.find(query).sort({ date: -1 });
         res.json(entries);
     } catch (err) {
         res.status(500).json({ message: err.message });
@@ -56,6 +59,55 @@ app.put('/api/entries/:id', async (req, res) => {
     try {
         const updatedEntry = await TimeEntry.findByIdAndUpdate(req.params.id, req.body, { new: true });
         res.json(updatedEntry);
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    }
+});
+
+// --- EMPLOYEE ROUTES ---
+
+// Get All Employees (Create Default if None)
+app.get('/api/employees', async (req, res) => {
+    try {
+        let employees = await Employee.find();
+        if (employees.length === 0) {
+            // Create Default Admin Employee
+            const defaultEmployee = new Employee({
+                name: 'Default Employee',
+                baseSalary: 30000
+            });
+            const savedEmp = await defaultEmployee.save();
+
+            // Assign existing orphaned entries to this new employee
+            await TimeEntry.updateMany(
+                { employeeId: { $exists: false } },
+                { $set: { employeeId: savedEmp._id } }
+            );
+
+            employees = [savedEmp];
+        }
+        res.json(employees);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+});
+
+// Create Employee
+app.post('/api/employees', async (req, res) => {
+    try {
+        const newEmployee = new Employee(req.body);
+        const savedEmployee = await newEmployee.save();
+        res.status(201).json(savedEmployee);
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    }
+});
+
+// Update Employee
+app.put('/api/employees/:id', async (req, res) => {
+    try {
+        const updatedEmployee = await Employee.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        res.json(updatedEmployee);
     } catch (err) {
         res.status(400).json({ message: err.message });
     }

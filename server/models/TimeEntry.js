@@ -6,6 +6,11 @@ const TimeEntrySchema = new mongoose.Schema({
         required: true,
         default: Date.now
     },
+    employeeId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Employee',
+        required: true
+    },
     checkIn: {
         type: String, // Storing as "HH:mm" 24h format
         required: true
