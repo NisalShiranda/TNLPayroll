@@ -17,14 +17,19 @@ const App = () => {
 
   const fetchData = async () => {
     try {
-      const settingsRes = await fetch(`${API_URL}/settings`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+      const settingsRes = await fetch(`${API_URL}/settings`, { signal: controller.signal });
       const settingsData = await settingsRes.json();
       setBaseSalary(settingsData.baseSalary || 30000);
       setSettingsId(settingsData._id);
 
-      const entriesRes = await fetch(`${API_URL}/entries`);
+      const entriesRes = await fetch(`${API_URL}/entries`, { signal: controller.signal });
       const entriesData = await entriesRes.json();
       setEntries(entriesData);
+
+      clearTimeout(timeoutId);
     } catch (error) {
       console.error("Error connecting to server", error);
     } finally {
