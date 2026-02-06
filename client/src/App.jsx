@@ -32,7 +32,7 @@ const App = () => {
   const [bonus, setBonus] = useState(0);
   const [advance, setAdvance] = useState(0);
 
-  const API_URL = 'http://localhost:5000/api';
+  const API_URL = 'https://tnlpayroll.onrender.com/api';
 
   useEffect(() => {
     fetchData();
