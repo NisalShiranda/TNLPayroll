@@ -263,8 +263,10 @@ const App = () => {
     const doc = new jsPDF();
 
     // Use custom range if provided, otherwise fallback to billing cycle
-    const start = customStart || billingStart;
-    const end = customEnd || billingEnd;
+    // Use custom range if provided and valid Date, otherwise fallback to billing cycle
+    // (Handle case where onClick passes an Event object as first arg)
+    const start = (customStart instanceof Date) ? customStart : billingStart;
+    const end = (customEnd instanceof Date) ? customEnd : billingEnd;
 
     // -- COLORS --
     const primaryColor = [15, 23, 42]; // Slate-900
@@ -405,7 +407,7 @@ const App = () => {
 
 
     // Use 'start' date to determine the month name for the file
-    const monthName = start.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).replace(/ /g, '_');
+    const monthName = end.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).replace(/ /g, '_');
     const safeEmpName = (selectedEmployee?.name || 'Employee').replace(/ /g, '_');
     doc.save(`Salary_Sheet_${monthName}_${safeEmpName}.pdf`);
   };
