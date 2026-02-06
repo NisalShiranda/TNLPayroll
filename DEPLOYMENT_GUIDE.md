@@ -1,72 +1,62 @@
-# 🚀 Step-by-Step Guide to Deploy Backend to Render
+# 🚀 Full Deployment Guide (Backend & Frontend)
 
-This guide will walk you through deploying your Node.js/Express backend to **Render.com**.
+## Part 1: Deploy Backend to Render (Already Done? ✅)
 
-## Prerequisite: Push Code to GitHub
+If you haven't done this yet, follow these steps:
 
-Before deploying, your code needs to be on GitHub.
-
-1.  **Open a Terminal** in your project root folder (`TNLPayroll`).
-2.  Run the following commands to push your changes:
+1.  **Push to GitHub:**
     ```bash
     git add .
     git commit -m "Prepare for deployment"
     git push
     ```
-
-## Step 1: Create a Render Service
-
-1.  Go to [dashboard.render.com](https://dashboard.render.com/) and log in.
-2.  Click the **"New +"** button and select **"Web Service"**.
-3.  Connect your **GitHub account** if you haven't already.
-4.  Find your repository (`TNLPayroll`) in the list and click **"Connect"**.
-
-## Step 2: Configure the Service
-
-Fill in the details as follows:
-
--   **Name:** `tnl-payroll-api` (or any name you like)
--   **Region:** Select the one closest to you (e.g., Singapore or Frankfurt).
--   **Branch:** `main` (or `master`)
--   **Root Directory:** `server` (Important! This tells Render your backend is inside the `server` folder)
--   **Runtime:** `Node`
--   **Build Command:** `npm install`
--   **Start Command:** `node index.js`
--   **Plan:** Select **"Free"**
-
-## Step 3: Set Environment Variables
-
-Scroll down to the **"Environment Variables"** section and click **"Add Environment Variable"**.
-
-You need to add your MongoDB connection string (same as in your `.env` file):
-
-| Key | Value |
-| :--- | :--- |
-| `MONGO_URI` | `mongodb+srv://...` (Your actual MongoDB Atlas connection string) |
-| `sceret_key` | (If you have a JWT secret or similar, add it here too) |
-
-> **Note:** If you are using a local MongoDB (`mongodb://localhost...`), it **will NOT work** on Render. You MUST use a cloud database like **MongoDB Atlas**. If you need help generating an Atlas connection string, let me know!
-
-## Step 4: Deploy
-
-1.  Click **"Create Web Service"**.
-2.  Render will start building your app. You can watch the logs in the dashboard.
-3.  Once it says **"Live"**, your backend is online! 🎉
-
-## Step 5: Update Frontend (Important!)
-
-Once deployed, Render will give you a URL (e.g., `https://tnl-payroll-api.onrender.com`).
-
-1.  Go back to your frontend code (`client/src/App.jsx`).
-2.  Find the line:
-    ```javascript
-    const API_URL = 'http://localhost:5000/api';
-    ```
-3.  Change it to your new Render URL:
-    ```javascript
-    const API_URL = 'https://tnl-payroll-api.onrender.com/api';
-    ```
-4.  Save and commit/push your frontend changes if you are deploying the frontend too.
+2.  **Create Service on Render:**
+    -   New **Web Service**.
+    -   Connect `TNLPayroll` repo.
+    -   **Root Directory:** `server`
+    -   **Build Command:** `npm install`
+    -   **Start Command:** `node index.js`
+    -   **Env Vars:** Add `MONGO_URI`.
 
 ---
-**Need help with MongoDB Atlas?** Just ask!
+
+## Part 2: Deploy Frontend to Vercel (New! ✨)
+
+Now let's get your React site online.
+
+### Step 1: Login to Vercel
+1.  Go to [vercel.com](https://vercel.com/) and log in (use GitHub login).
+
+### Step 2: Add New Project
+1.  Click **"Add New..."** -> **"Project"**.
+2.  Find your `TNLPayroll` repository and click **"Import"**.
+
+### Step 3: Configure Project (Crucial Step!)
+
+You will see a "Configure Project" screen. You **MUST** change the Root Directory because your React app is inside the `client` folder.
+
+1.  Look for **"Root Directory"**.
+2.  Click **"Edit"**.
+3.  Select the **`client`** folder and click **"Continue"**.
+
+### Step 4: Verify Settings
+Once you select `client`, Vercel should auto-detect the rest:
+-   **Framework Preset:** `Vite`
+-   **Build Command:** `npm run build` (or `vite build`)
+-   **Output Directory:** `dist`
+
+If these look correct, click **"Deploy"**.
+
+### Step 5: Done! 🎉
+-   Vercel will build your site (takes ~1 minute).
+-   Once finished, you will get a domain like `tnl-payroll.vercel.app`.
+-   **Click it** and test your app!
+
+---
+
+## Troubleshooting
+-   **App fits API Error?**
+    -   Check if your Backend (Render) is awake (it might take 30s to wake up).
+    -   Check Console (F12) for any red errors.
+-   **"404 Not Found" on specific pages?**
+    -   Since this is a Single Page App (SPA), Vercel usually handles this, but if you get 404s on refresh, you might need a `vercel.json` file. (Usually Vite preset handles this automatically).
